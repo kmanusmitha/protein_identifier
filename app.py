@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from Bio.Align import PairwiseAligner, substitution_matrices
 
@@ -33,11 +32,27 @@ reference_database = {
     "P69905_HUMAN | Hemoglobin Subunit Alpha [Homo sapiens]": (
         "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG"
         "KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP"
+    ),
+    "P68871_HUMAN | Hemoglobin Subunit Beta [Homo sapiens]": (
+        "MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPK"
+        "VKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFG"
+        "KEFTPPVQAAYQKVVAGVANALAHKYH"
+    ),
+    "P42212_AEQVI | Green Fluorescent Protein (GFP) [Jellyfish]": (
+        "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTL"
+        "VTTFSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLV"
+        "NRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLAD"
+        "HYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+    ),
+    "P00698_CHICK | Lysozyme C Enzyme [Gallus gallus]": (
+        "MRSLLILVLCFLPLAALGKVFGRCELAAAMKRHGLDNYRGYSLGNWVCAAKFESNFNTQA"
+        "TNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDG"
+        "NGMNAWVAWRNRCKGTDVQAWIRGCRL"
     )
 }
 
 fasta_input = st.text_area("Paste ANY Unknown Protein Sequence (FASTA format):", value=default_fasta, height=150)
-use_live_api = st.checkbox("🌐 Search Live Global UniProt / Swiss-Prot Server (For any unknown protein, takes ~20 sec)", value=True)
+use_live_api = st.checkbox("🌐 Query Live Global UniProt Knowledgebase (Instant Peptide & Protein Lookup)", value=True)
 
 if st.button("🔍 Identify & Analyze Protein"):
     lines = fasta_input.strip().splitlines()
@@ -49,6 +64,7 @@ if st.button("🔍 Identify & Analyze Protein"):
         sequence = "".join(raw_lines).upper().replace(" ", "")
 
         try:
+            # 1. PHYSICOCHEMICAL ANALYSIS
             protein = ProteinAnalysis(sequence)
             length = len(sequence)
             mw = round(protein.molecular_weight(), 2)
@@ -71,7 +87,8 @@ if st.button("🔍 Identify & Analyze Protein"):
             df_aa = pd.DataFrame(list(aa_counts.items()), columns=["Amino Acid", "Count"]).set_index("Amino Acid")
             st.bar_chart(df_aa)
 
-            st.subheader("🧬 Local Reference Homology (BLOSUM62)")
+            # 2. BLOSUM62 SEQUENCE ALIGNMENT
+            st.subheader("🧬 Sequence Homology Alignment (BLOSUM62)")
             aligner = PairwiseAligner()
             aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
             aligner.open_gap_score = -10
@@ -94,44 +111,49 @@ if st.button("🔍 Identify & Analyze Protein"):
             top_sim = df_matches["Similarity (%)"].tolist().pop(0)
 
             if top_sim == 0:
-                st.info("No close match in local 5-protein cache. Checking Global UniProt Server below...")
+                st.info("No close match in local cache. Checking Global UniProt Server below...")
             else:
-                st.success(f"**Local Match Found:** {top_name} (**{top_sim}% Similarity**)")
+                st.success(f"**Best Homology Match:** {top_name} (**{top_sim}% Similarity**)")
             st.dataframe(df_matches, use_container_width=True)
 
+            # 3. FAST LIVE UNIPROT REST API SEARCH (Uses 15-AA signature peptide)
             if use_live_api:
-                st.subheader("🌐 Live Global UniProt / Swiss-Prot Database Search")
-                with st.spinner("Querying EMBL-EBI / UniProt Global Servers (Please wait ~15-30 seconds)..."):
-                    submit_url = "https://ebi.ac.uk"
-                    payload = {
-                        "email": "bioinformatics.capstone@example.com",
-                        "program": "blastp",
-                        "stype": "protein",
-                        "database": "uniprotkb_swissprot",
-                        "sequence": sequence
-                    }
-                    res = requests.post(submit_url, data=payload, timeout=15)
-                    job_id = res.text.strip()
+                st.subheader("🌐 Live Global UniProt Knowledgebase Lookup")
+                with st.spinner("Searching 250M+ proteins on UniProt REST API..."):
+                    signature_peptide = sequence[:15]
+                    uniprot_url = f"https://uniprot.org:{signature_peptide}&format=json&size=5"
+                    res = requests.get(uniprot_url, timeout=15)
 
-                    if job_id.startswith("ncbiblast-"):
-                        status_url = f"https://ebi.ac.uk{job_id}"
-                        for _ in range(12):
-                            status = requests.get(status_url, timeout=10).text.strip()
-                            if status == "FINISHED":
-                                break
-                            time.sleep(4)
-
-                        result_url = f"https://ebi.ac.uk{job_id}/out"
-                        report_text = requests.get(result_url, timeout=15).text
-                        hit_lines = [line for line in report_text.splitlines() if line.startswith("SP:")]
-
-                        if hit_lines:
-                            st.success(f"✅ Found {len(hit_lines)} reviewed matches in Global UniProtKB/Swiss-Prot!")
-                            st.code("\n".join(hit_lines[:10]), language="text")
+                    if res.status_code == 200:
+                        data = res.json()
+                        results = data.get("results", [])
+                        if results:
+                            live_hits = []
+                            for item in results:
+                                acc = item.get("primaryAccession", "N/A")
+                                uni_id = item.get("uniProtkbId", "N/A")
+                                org = item.get("organism", {}).get("scientificName", "Unknown")
+                                desc = item.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value", "")
+                                if not desc:
+                                    sub_names = item.get("proteinDescription", {}).get("submissionNames", [])
+                                    if sub_names:
+                                        desc = sub_names.pop(0).get("fullName", {}).get("value", "Uncharacterized protein")
+                                    else:
+                                        desc = "Uncharacterized protein"
+                                seq_len = item.get("sequence", {}).get("length", 0)
+                                live_hits.append({
+                                    "UniProt ID": acc,
+                                    "Entry Name": uni_id,
+                                    "Protein Description": desc,
+                                    "Organism": org,
+                                    "Length (A.A.)": seq_len
+                                })
+                            st.success(f"✅ Found {len(live_hits)} live matches in Global UniProtKB!")
+                            st.dataframe(pd.DataFrame(live_hits), use_container_width=True)
                         else:
-                            st.warning("No reviewed match found in Swiss-Prot (Potentially novel/uncharacterized sequence).")
+                            st.info("No exact 15-residue motif match in UniProtKB (Potentially novel sequence).")
                     else:
-                        st.warning("Live external API busy. Please try again in a moment.")
+                        st.warning("UniProt server temporarily unreachable. Local BLOSUM62 results above remain valid.")
 
         except Exception as e:
             st.error(f"Error analyzing sequence: {e}. Make sure only valid amino acid letters are used.")
