@@ -64,7 +64,6 @@ if st.button("🔍 Identify & Analyze Protein"):
         sequence = "".join(raw_lines).upper().replace(" ", "")
 
         try:
-            # 1. PHYSICOCHEMICAL ANALYSIS
             protein = ProteinAnalysis(sequence)
             length = len(sequence)
             mw = round(protein.molecular_weight(), 2)
@@ -87,7 +86,6 @@ if st.button("🔍 Identify & Analyze Protein"):
             df_aa = pd.DataFrame(list(aa_counts.items()), columns=["Amino Acid", "Count"]).set_index("Amino Acid")
             st.bar_chart(df_aa)
 
-            # 2. BLOSUM62 SEQUENCE ALIGNMENT
             st.subheader("🧬 Sequence Homology Alignment (BLOSUM62)")
             aligner = PairwiseAligner()
             aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
@@ -116,14 +114,12 @@ if st.button("🔍 Identify & Analyze Protein"):
                 st.success(f"**Best Homology Match:** {top_name} (**{top_sim}% Similarity**)")
             st.dataframe(df_matches, use_container_width=True)
 
-            # 3. FAST LIVE UNIPROT REST API SEARCH (Uses 15-AA signature peptide)
             if use_live_api:
                 st.subheader("🌐 Live Global UniProt Knowledgebase Lookup")
                 with st.spinner("Searching 250M+ proteins on UniProt REST API..."):
                     signature_peptide = sequence[:15]
-                                      uniprot_url = "https://uniprot.org"
+                    uniprot_url = "https://uniprot.org"
                     res = requests.get(uniprot_url, params={"query": f"sequence:{signature_peptide}", "format": "json", "size": 5}, timeout=15)
-
 
                     if res.status_code == 200:
                         data = res.json()
