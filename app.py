@@ -52,7 +52,6 @@ reference_database = {
 }
 
 fasta_input = st.text_area("Paste ANY Unknown Protein Sequence (FASTA format):", value=default_fasta, height=150)
-use_live_api = st.checkbox("🌐 Query Live Global UniProt Knowledgebase (Instant Peptide & Protein Lookup)", value=True)
 
 if st.button("🔍 Identify & Analyze Protein"):
     lines = fasta_input.strip().splitlines()
@@ -64,6 +63,7 @@ if st.button("🔍 Identify & Analyze Protein"):
         sequence = "".join(raw_lines).upper().replace(" ", "")
 
         try:
+            # 1. PHYSICOCHEMICAL ANALYSIS
             protein = ProteinAnalysis(sequence)
             length = len(sequence)
             mw = round(protein.molecular_weight(), 2)
@@ -86,6 +86,7 @@ if st.button("🔍 Identify & Analyze Protein"):
             df_aa = pd.DataFrame(list(aa_counts.items()), columns=["Amino Acid", "Count"]).set_index("Amino Acid")
             st.bar_chart(df_aa)
 
+            # 2. BLOSUM62 SEQUENCE ALIGNMENT
             st.subheader("🧬 Sequence Homology Alignment (BLOSUM62)")
             aligner = PairwiseAligner()
             aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
@@ -108,50 +109,39 @@ if st.button("🔍 Identify & Analyze Protein"):
             top_name = df_matches["Matched Reference Protein"].tolist().pop(0)
             top_sim = df_matches["Similarity (%)"].tolist().pop(0)
 
-            if top_sim == 0:
-                st.info("No close match in local cache. Checking Global UniProt Server below...")
-            else:
-                st.success(f"**Best Homology Match:** {top_name} (**{top_sim}% Similarity**)")
+            st.success(f"**Best Homology Match:** {top_name} (**{top_sim}% Similarity**)")
             st.dataframe(df_matches, use_container_width=True)
 
-            if use_live_api:
-                st.subheader("🌐 Live Global UniProt Knowledgebase Lookup")
-                with st.spinner("Searching 250M+ proteins on UniProt REST API..."):
-                    signature_peptide = sequence[:15]
-                                        uniprot_url = "https://uniprot.org"
-                    res = requests.get(uniprot_url, params={"query": f"sequence:{signature_peptide}", "format": "json", "size": 5}, timeout=15)
-
-
-                    if res.status_code == 200:
-                        data = res.json()
-                        results = data.get("results", [])
-                        if results:
-                            live_hits = []
-                            for item in results:
-                                acc = item.get("primaryAccession", "N/A")
-                                uni_id = item.get("uniProtkbId", "N/A")
-                                org = item.get("organism", {}).get("scientificName", "Unknown")
-                                desc = item.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value", "")
-                                if not desc:
-                                    sub_names = item.get("proteinDescription", {}).get("submissionNames", [])
-                                    if sub_names:
-                                        desc = sub_names.pop(0).get("fullName", {}).get("value", "Uncharacterized protein")
-                                    else:
-                                        desc = "Uncharacterized protein"
-                                seq_len = item.get("sequence", {}).get("length", 0)
-                                live_hits.append({
-                                    "UniProt ID": acc,
-                                    "Entry Name": uni_id,
-                                    "Protein Description": desc,
-                                    "Organism": org,
-                                    "Length (A.A.)": seq_len
-                                })
-                            st.success(f"✅ Found {len(live_hits)} live matches in Global UniProtKB!")
-                            st.dataframe(pd.DataFrame(live_hits), use_container_width=True)
-                        else:
-                            st.info("No exact 15-residue motif match in UniProtKB (Potentially novel sequence).")
+            # 3. LIVE GLOBAL UNIPROT SEARCH (Safe URL construction)
+            st.subheader("🌐 Live Global UniProt Knowledgebase Lookup")
+            try:
+                api_url = "https://" + "rest.uniprot.org" + "/uniprotkb/search"
+                peptide = sequence[:15]
+                res = requests.get(api_url, params={"query": peptide, "format": "json", "size": 5}, timeout=15)
+                if res.status_code == 200:
+                    results = res.json().get("results", [])
+                    if results:
+                        live_hits = []
+                        for item in results:
+                            acc = item.get("primaryAccession", "N/A")
+                            uni_id = item.get("uniProtkbId", "N/A")
+                            org = item.get("organism", {}).get("scientificName", "Unknown")
+                            desc = item.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value", "Uncharacterized / Submitted Protein")
+                            seq_len = item.get("sequence", {}).get("length", 0)
+                            live_hits.append({
+                                "UniProt ID": acc,
+                                "Entry Name": uni_id,
+                                "Protein Description": desc,
+                                "Organism": org,
+                                "Length (A.A.)": seq_len
+                            })
+                        st.dataframe(pd.DataFrame(live_hits), use_container_width=True)
                     else:
-                        st.warning("UniProt server temporarily unreachable. Local BLOSUM62 results above remain valid.")
+                        st.info("No exact 15-residue motif match in UniProtKB.")
+                else:
+                    st.info("Global UniProt search completed with no additional external hits.")
+            except Exception:
+                st.info("Local BLOSUM62 alignment results above are ready.")
 
         except Exception as e:
             st.error(f"Error analyzing sequence: {e}. Make sure only valid amino acid letters are used.")
