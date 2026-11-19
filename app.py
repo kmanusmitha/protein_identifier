@@ -118,8 +118,9 @@ if st.button("🔍 Identify & Analyze Protein"):
                 st.subheader("🌐 Live Global UniProt Knowledgebase Lookup")
                 with st.spinner("Searching 250M+ proteins on UniProt REST API..."):
                     signature_peptide = sequence[:15]
-                    uniprot_url = "https://uniprot.org"
+                                        uniprot_url = "https://uniprot.org"
                     res = requests.get(uniprot_url, params={"query": f"sequence:{signature_peptide}", "format": "json", "size": 5}, timeout=15)
+
 
                     if res.status_code == 200:
                         data = res.json()
